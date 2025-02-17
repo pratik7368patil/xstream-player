@@ -13,7 +13,31 @@ class XStreamPlayer {
     this.currentSegmentIndex = 0;
     this.segments = [];
     this.icons = {};
+    this.loadingTimeout = null;
+    this.loadingStates = new Set();
     this.init();
+  }
+
+  setLoadingState(state, isLoading) {
+    if (isLoading) {
+      this.loadingStates.add(state);
+    } else {
+      this.loadingStates.delete(state);
+    }
+
+    // Clear any existing timeout
+    if (this.loadingTimeout) {
+      clearTimeout(this.loadingTimeout);
+    }
+
+    // Add a small delay before showing loading state to prevent flickering
+    this.loadingTimeout = setTimeout(() => {
+      if (this.loadingStates.size > 0) {
+        this.container.classList.add("is-loading");
+      } else {
+        this.container.classList.remove("is-loading");
+      }
+    }, 150); // Small delay to prevent flickering
   }
 
   async init() {
@@ -23,12 +47,18 @@ class XStreamPlayer {
 
       // Create player container
       this.container = document.createElement("div");
-      this.container.className = "xstream-player";
+      this.container.className = "xstream-player is-initial-load";
 
       // Create video container
       const videoContainer = document.createElement("div");
       videoContainer.className = "video-container";
       this.container.appendChild(videoContainer);
+
+      // Create loading spinner
+      const loadingSpinner = document.createElement("div");
+      loadingSpinner.className = "loading-spinner";
+      loadingSpinner.innerHTML = this.icons.spinner || '';
+      videoContainer.appendChild(loadingSpinner);
 
       // Create video element
       this.video = document.createElement("video");
@@ -66,7 +96,8 @@ class XStreamPlayer {
       mute: '/assets/mute.svg',
       fullscreen: '/assets/fullscreen.svg',
       quality: '/assets/quality.svg',
-      check: '/assets/check.svg'
+      check: '/assets/check.svg',
+      spinner: '/assets/spinner.svg'
     };
 
     for (const [name, path] of Object.entries(iconFiles)) {
@@ -366,6 +397,38 @@ class XStreamPlayer {
           break;
       }
     });
+
+    // Loading states
+    video.addEventListener("loadstart", () => {
+      this.setLoadingState('initial', true);
+    });
+
+    video.addEventListener("canplay", () => {
+      this.setLoadingState('initial', false);
+      this.setLoadingState('buffering', false);
+      container.classList.remove("is-initial-load");
+    });
+
+    video.addEventListener("waiting", () => {
+      this.setLoadingState('buffering', true);
+    });
+
+    video.addEventListener("playing", () => {
+      this.setLoadingState('buffering', false);
+      this.setLoadingState('seeking', false);
+      this.setLoadingState('fragment', false);
+    });
+
+    video.addEventListener("seeked", () => {
+      this.setLoadingState('seeking', false);
+      this.setLoadingState('fragment', false);
+    });
+
+    // Error handling
+    video.addEventListener("error", () => {
+      this.setLoadingState('error', true);
+      console.error("Video error:", video.error);
+    });
   }
 
   togglePlay() {
@@ -426,21 +489,59 @@ class XStreamPlayer {
       testBandwidth: true,
       progressive: true,
       lowLatencyMode: false,
+      // Custom fragment loading strategy
+      fragLoadingPolicy: {
+        default: {
+          maxRetry: 3,
+          retryDelay: 500,
+          maxRetryDelay: 2000,
+          backoff: 'exponential'
+        }
+      },
+      // Optimize buffer management
+      backBufferLength: 30, // Only keep 30 seconds of back buffer
+      enableSoftwareAES: true,
     });
 
-    hls.loadSource(this.url);
+    // Attach media
     hls.attachMedia(this.video);
 
-    hls.on(window.Hls.Events.MANIFEST_PARSED, (event, data) => {
-      console.log("HLS: Manifest loaded, beginning playback");
+    // Handle HLS events for optimized loading
+    hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
       this.updateQualityLevels(hls);
+      console.log('Manifest loaded, found ' + hls.levels.length + ' quality level(s)');
     });
 
-    hls.on(window.Hls.Events.LEVEL_SWITCHED, (event, data) => {
-      this.updateActiveQuality(hls, data.level);
+    // Loading states for fragments
+    let fragLoadingTimeout;
+    
+    hls.on(window.Hls.Events.FRAG_LOADING, (event, data) => {
+      // Clear any existing timeout
+      if (fragLoadingTimeout) {
+        clearTimeout(fragLoadingTimeout);
+      }
+      
+      // Only show loading state if fragment takes more than 150ms to load
+      fragLoadingTimeout = setTimeout(() => {
+        this.setLoadingState('fragment', true);
+      }, 150);
+      
+      console.log('Loading fragment at position:', data.frag.start);
     });
 
+    hls.on(window.Hls.Events.FRAG_LOADED, (event, data) => {
+      // Clear the timeout if fragment loads quickly
+      if (fragLoadingTimeout) {
+        clearTimeout(fragLoadingTimeout);
+      }
+      
+      this.setLoadingState('fragment', false);
+      console.log('Loaded fragment at position:', data.frag.start);
+    });
+
+    // Error handling
     hls.on(window.Hls.Events.ERROR, (event, data) => {
+      this.setLoadingState('hlsError', true);
       console.error("HLS error:", data);
       if (data.fatal) {
         switch (data.type) {
@@ -458,11 +559,150 @@ class XStreamPlayer {
             this.initWithCustomM3U8();
             break;
         }
+      } else {
+        // Non-fatal error, remove loading state after a delay
+        setTimeout(() => {
+          this.setLoadingState('hlsError', false);
+        }, 2000);
       }
     });
 
-    // Store hls instance
+    // Load source
+    hls.loadSource(this.url);
     this.hls = hls;
+
+    // Store reference to hls instance
+    this._setupAdvancedSeek(hls);
+  }
+
+  _setupAdvancedSeek(hls) {
+    let lastSeekTarget = 0;
+    let seekTimer = null;
+    let seekLoadingTimeout = null;
+
+    const seekToPosition = (targetTime) => {
+      if (this.video.readyState === 0) return;
+
+      // Show loading state with delay to prevent flickering
+      if (seekLoadingTimeout) {
+        clearTimeout(seekLoadingTimeout);
+      }
+      
+      seekLoadingTimeout = setTimeout(() => {
+        this.setLoadingState('seeking', true);
+      }, 150);
+
+      // Clear existing fragments that are no longer needed
+      hls.trigger(window.Hls.Events.BUFFER_FLUSHING, {
+        startOffset: 0,
+        endOffset: targetTime - 1
+      });
+
+      // Find the closest fragment to the target time
+      const { fragments } = hls.levels[hls.currentLevel];
+      if (!fragments) {
+        if (seekLoadingTimeout) {
+          clearTimeout(seekLoadingTimeout);
+        }
+        this.setLoadingState('seeking', false);
+        return;
+      }
+
+      let targetFragment = null;
+      for (let i = 0; i < fragments.length; i++) {
+        if (fragments[i].start <= targetTime && fragments[i].end >= targetTime) {
+          targetFragment = fragments[i];
+          break;
+        }
+      }
+
+      if (targetFragment) {
+        // Load the target fragment and a few subsequent fragments
+        hls.trigger(window.Hls.Events.BUFFER_RESET);
+        
+        const fragLoadedCallback = (event, data) => {
+          if (data.frag.start >= targetTime - 0.1) {
+            hls.off(window.Hls.Events.FRAG_LOADED, fragLoadedCallback);
+            this.video.currentTime = targetTime;
+          }
+        };
+        
+        const seekingCallback = () => {
+          this.video.removeEventListener('seeking', seekingCallback);
+          this.video.addEventListener('canplay', canPlayCallback, { once: true });
+        };
+
+        const canPlayCallback = () => {
+          // Clear loading states
+          if (seekLoadingTimeout) {
+            clearTimeout(seekLoadingTimeout);
+          }
+          this.setLoadingState('seeking', false);
+          this.setLoadingState('fragment', false);
+          
+          // Remove the event listener
+          this.video.removeEventListener('canplay', canPlayCallback);
+        };
+
+        this.video.addEventListener('seeking', seekingCallback, { once: true });
+        hls.on(window.Hls.Events.FRAG_LOADED, fragLoadedCallback);
+
+        // Start loading from the target fragment
+        hls.loadFragment(targetFragment);
+      } else {
+        // No fragment found, clear loading state
+        if (seekLoadingTimeout) {
+          clearTimeout(seekLoadingTimeout);
+        }
+        this.setLoadingState('seeking', false);
+      }
+    };
+
+    // Update seek handling in event listeners
+    const handleSeek = (e) => {
+      const rect = this.container.querySelector(".progress-bar").getBoundingClientRect();
+      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const seekTime = pos * this.video.duration;
+      
+      // Update UI immediately
+      const progress = this.container.querySelector(".progress");
+      progress.style.width = `${pos * 100}%`;
+      this.container.querySelector(".time-display").textContent = 
+        `${this.formatTime(seekTime)} / ${this.formatTime(this.video.duration)}`;
+
+      // Debounce the actual seek operation
+      clearTimeout(seekTimer);
+      lastSeekTarget = seekTime;
+      
+      seekTimer = setTimeout(() => {
+        if (Math.abs(this.video.currentTime - lastSeekTarget) > 0.5) {
+          seekToPosition(lastSeekTarget);
+        }
+      }, 50);
+    };
+
+    // Update existing event listeners
+    const progressBar = this.container.querySelector(".progress-bar");
+    let isMouseDown = false;
+
+    progressBar.addEventListener("mousedown", (e) => {
+      isMouseDown = true;
+      this.container.classList.add("is-seeking");
+      handleSeek(e);
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (isMouseDown) {
+        handleSeek(e);
+      }
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (isMouseDown) {
+        isMouseDown = false;
+        this.container.classList.remove("is-seeking");
+      }
+    });
   }
 
   updateQualityLevels(hls) {

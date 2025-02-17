@@ -343,6 +343,81 @@ body {
   pointer-events: none;
 }
 
+/* Loading States */
+.xstream-player .loading-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 48px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.xstream-player .loading-spinner svg {
+  width: 100%;
+  height: 100%;
+  color: #fff;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+}
+
+.xstream-player.is-loading .loading-spinner {
+  opacity: 1;
+  visibility: visible;
+}
+
+.xstream-player .video-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0);
+  z-index: 1;
+  pointer-events: none;
+  transition: background-color 0.3s ease;
+}
+
+.xstream-player.is-loading .video-container::after {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* Hide controls during initial loading */
+.xstream-player.is-initial-load .video-controls {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+/* Show loading state in progress bar during seeking */
+.xstream-player.is-seeking .progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.1);
+  animation: progress-loading 1.5s ease-in-out infinite;
+}
+
+@keyframes progress-loading {
+  0% {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  50% {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  100% {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+
 /* Responsive adjustments */
 @media (max-width: 1016px) {
   #app {
