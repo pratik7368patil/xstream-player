@@ -3,7 +3,7 @@
   --yt-spec-text-primary: #fff;
   --yt-spec-text-secondary: #aaa;
   --yt-spec-brand-button-background: #c00;
-  --max-player-width: 1280px;
+  --max-player-width: 640px;
   --controls-bg: rgba(0, 0, 0, 0.7);
 }
 
@@ -22,19 +22,32 @@ body {
 
 #app {
   width: 100%;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 24px; /* YouTube's exact top spacing */
+  justify-content: center;
+  padding: 16px;
 }
 
-/* Main player wrapper */
-.xstream-player {
+/* Player wrapper */
+.xstream-player-wrapper {
   width: 100%;
   max-width: var(--max-player-width);
+  margin: 0 auto;
+  background: #000;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+/* Main player */
+.xstream-player {
+  width: 100%;
   background: #000;
   position: relative;
-  margin: 0 auto;
+  height: auto;
+  aspect-ratio: 16/9;
 }
 
 /* Video container with aspect ratio */
@@ -43,6 +56,7 @@ body {
   position: relative;
   padding-top: 56.25%; /* Exact 16:9 ratio */
   overflow: hidden;
+  background: #000;
 }
 
 /* Video element */
@@ -360,7 +374,8 @@ body {
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.3s ease, visibility 0.3s ease;
-  z-index: 2;
+  z-index: 5;
+  display: none;
   pointer-events: none;
 }
 
@@ -372,8 +387,7 @@ body {
 }
 
 .xstream-player.is-loading .loading-spinner {
-  opacity: 1;
-  visibility: visible;
+  display: block;
 }
 
 .xstream-player .video-container::after {
@@ -427,21 +441,16 @@ body {
 /* Responsive adjustments */
 @media (max-width: 1016px) {
   #app {
-    padding-top: 16px;
+    padding: 16px;
   }
   
-  .xstream-player {
+  .xstream-player-wrapper {
     margin: 0;
   }
 }
 
 @media (max-width: 768px) {
   #app {
-    padding-top: 0;
-  }
-  
-  .xstream-player .video-container {
-    height: 100vh;
-    padding-top: 0;
+    padding: 0;
   }
 }
