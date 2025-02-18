@@ -64,16 +64,22 @@ body {
   right: 0;
   background: var(--controls-bg);
   padding: 10px;
-  opacity: 0;
-  transition: opacity 0.3s;
+  opacity: 1;
+  transition: opacity 0.3s ease;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  z-index: 10;
 }
 
-.xstream-player:hover .video-controls,
-.video-controls:hover {
+.xstream-player.controls-hidden .video-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.xstream-player .video-controls:focus-within {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* Progress Bar */

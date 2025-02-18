@@ -20,6 +20,10 @@ class XStreamPlayer {
 
   setLoadingState(state, isLoading) {
     if (isLoading) {
+      // Don't show loading if video is already playing
+      if (state !== "seeking" && this.video && !this.video.paused) {
+        return;
+      }
       this.loadingStates.add(state);
     } else {
       this.loadingStates.delete(state);
@@ -30,14 +34,17 @@ class XStreamPlayer {
       clearTimeout(this.loadingTimeout);
     }
 
-    // Add a small delay before showing loading state to prevent flickering
+    // Add a longer delay before showing loading state to prevent flickering
     this.loadingTimeout = setTimeout(() => {
-      if (this.loadingStates.size > 0) {
+      if (
+        this.loadingStates.size > 0 &&
+        (!this.video || this.video.paused || this.loadingStates.has("seeking"))
+      ) {
         this.container.classList.add("is-loading");
       } else {
         this.container.classList.remove("is-loading");
       }
-    }, 150); // Small delay to prevent flickering
+    }, 300); // Increased delay to prevent flickering
   }
 
   async init() {
@@ -45,29 +52,30 @@ class XStreamPlayer {
       // Load SVG icons
       await this.loadIcons();
 
-      // Create player container
+      // Create player container and insert HTML structure
       this.container = document.createElement("div");
-      this.container.className = "xstream-player is-initial-load";
-
-      // Create video container
-      const videoContainer = document.createElement("div");
-      videoContainer.className = "video-container";
-      this.container.appendChild(videoContainer);
-
-      // Create loading spinner
-      const loadingSpinner = document.createElement("div");
-      loadingSpinner.className = "loading-spinner";
-      loadingSpinner.innerHTML = this.icons.spinner || '';
-      videoContainer.appendChild(loadingSpinner);
-
-      // Create video element
-      this.video = document.createElement("video");
-      this.video.controls = false; // Disable default controls
-      videoContainer.appendChild(this.video);
-
-      // Create custom controls
+      this.container.className = "xstream-player";
+      
+      // Create controls first so we can reference them
       const controls = this.createControls();
+      
+      const playerTemplate = `
+        <div class="video-container">
+          <div class="loading-spinner">${this.icons.spinner || ""}</div>
+          <video></video>
+        </div>
+      `;
+      
+      this.container.innerHTML = playerTemplate;
+
+      // Get reference to video element and video container
+      this.video = this.container.querySelector("video");
+      const videoContainer = this.container.querySelector(".video-container");
+      
+      // Append controls after setting innerHTML
       videoContainer.appendChild(controls);
+      
+      this.video.controls = false; // Disable default controls
 
       // Add container to DOM
       const appDiv = document.getElementById("app");
@@ -90,14 +98,14 @@ class XStreamPlayer {
 
   async loadIcons() {
     const iconFiles = {
-      play: '/assets/play.svg',
-      pause: '/assets/pause.svg',
-      volume: '/assets/volume.svg',
-      mute: '/assets/mute.svg',
-      fullscreen: '/assets/fullscreen.svg',
-      quality: '/assets/quality.svg',
-      check: '/assets/check.svg',
-      spinner: '/assets/spinner.svg'
+      play: "/assets/play.svg",
+      pause: "/assets/pause.svg",
+      volume: "/assets/volume.svg",
+      mute: "/assets/mute.svg",
+      fullscreen: "/assets/fullscreen.svg",
+      quality: "/assets/quality.svg",
+      check: "/assets/check.svg",
+      spinner: "/assets/spinner.svg",
     };
 
     for (const [name, path] of Object.entries(iconFiles)) {
@@ -112,31 +120,31 @@ class XStreamPlayer {
   }
 
   createPlayIcon() {
-    return this.icons.play || '';
+    return this.icons.play || "";
   }
 
   createPauseIcon() {
-    return this.icons.pause || '';
+    return this.icons.pause || "";
   }
 
   createVolumeIcon() {
-    return this.icons.volume || '';
+    return this.icons.volume || "";
   }
 
   createMutedIcon() {
-    return this.icons.mute || '';
+    return this.icons.mute || "";
   }
 
   createFullscreenIcon() {
-    return this.icons.fullscreen || '';
+    return this.icons.fullscreen || "";
   }
 
   createQualityIcon() {
-    return this.icons.quality || '';
+    return this.icons.quality || "";
   }
 
   createCheckIcon() {
-    return this.icons.check || '';
+    return this.icons.check || "";
   }
 
   createControls() {
@@ -146,13 +154,13 @@ class XStreamPlayer {
     // Progress bar
     const progressBar = document.createElement("div");
     progressBar.className = "progress-bar";
-    
+
     const buffered = document.createElement("div");
     buffered.className = "buffered";
-    
+
     const progress = document.createElement("div");
     progress.className = "progress";
-    
+
     progressBar.appendChild(buffered);
     progressBar.appendChild(progress);
 
@@ -170,17 +178,17 @@ class XStreamPlayer {
 
     const volumeContainer = document.createElement("div");
     volumeContainer.className = "volume-container";
-    
+
     const volumeButton = document.createElement("button");
     volumeButton.className = "control-button volume";
     volumeButton.innerHTML = this.createVolumeIcon();
-    
+
     const volumeSlider = document.createElement("div");
     volumeSlider.className = "volume-slider";
-    
+
     const volumeLevel = document.createElement("div");
     volumeLevel.className = "volume-level";
-    
+
     volumeSlider.appendChild(volumeLevel);
     volumeContainer.appendChild(volumeButton);
     volumeContainer.appendChild(volumeSlider);
@@ -203,7 +211,7 @@ class XStreamPlayer {
 
     const qualityButton = document.createElement("button");
     qualityButton.className = "control-button quality-button";
-    qualityButton.innerHTML = this.createQualityIcon() + '<span>Auto</span>';
+    qualityButton.innerHTML = this.createQualityIcon() + "<span>Auto</span>";
 
     const qualityMenu = document.createElement("div");
     qualityMenu.className = "quality-menu";
@@ -221,7 +229,7 @@ class XStreamPlayer {
     // Assemble controls
     controlsRow.appendChild(leftControls);
     controlsRow.appendChild(rightControls);
-    
+
     controls.appendChild(progressBar);
     controls.appendChild(controlsRow);
 
@@ -246,15 +254,53 @@ class XStreamPlayer {
     playButton.addEventListener("click", () => this.togglePlay());
     video.addEventListener("click", () => this.togglePlay());
 
-    // Update play button icon
+    // Update play button icon and control visibility
     video.addEventListener("play", () => {
       playButton.innerHTML = this.createPauseIcon();
       this.isPlaying = true;
+      // Hide controls after a delay when video starts playing
+      setTimeout(() => {
+        if (this.isPlaying && !this.container.matches(":hover")) {
+          this.container.classList.add("controls-hidden");
+        }
+      }, 2000);
     });
 
     video.addEventListener("pause", () => {
       playButton.innerHTML = this.createPlayIcon();
       this.isPlaying = false;
+      this.container.classList.remove("controls-hidden");
+    });
+
+    // Show/hide controls on hover
+    this.container.addEventListener("mouseenter", () => {
+      this.container.classList.remove("controls-hidden");
+    });
+
+    this.container.addEventListener("mouseleave", () => {
+      if (this.isPlaying) {
+        this.container.classList.add("controls-hidden");
+      }
+    });
+
+    // Keep controls visible while interacting with them
+    const controls = container.querySelector(".video-controls");
+    controls.addEventListener("mouseenter", () => {
+      this.container.classList.remove("controls-hidden");
+    });
+
+    // Show controls on mouse move
+    let mouseMovementTimer;
+    this.container.addEventListener("mousemove", () => {
+      this.container.classList.remove("controls-hidden");
+      clearTimeout(mouseMovementTimer);
+      if (this.isPlaying) {
+        mouseMovementTimer = setTimeout(() => {
+          if (!this.container.matches(":hover")) {
+            this.container.classList.add("controls-hidden");
+          }
+        }, 2000);
+      }
     });
 
     // Volume
@@ -273,7 +319,9 @@ class XStreamPlayer {
       if (!isSeeking) {
         const percent = (video.currentTime / video.duration) * 100;
         progress.style.width = `${percent}%`;
-        timeDisplay.textContent = `${this.formatTime(video.currentTime)} / ${this.formatTime(video.duration)}`;
+        timeDisplay.textContent = `${this.formatTime(
+          video.currentTime
+        )} / ${this.formatTime(video.duration)}`;
       }
     });
 
@@ -288,7 +336,7 @@ class XStreamPlayer {
 
     // Click progress bar to seek
     let isMouseDown = false;
-    
+
     progressBar.addEventListener("mousedown", (e) => {
       isMouseDown = true;
       isSeeking = true;
@@ -310,12 +358,17 @@ class XStreamPlayer {
 
     const handleSeek = (e) => {
       const rect = progressBar.getBoundingClientRect();
-      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const pos = Math.max(
+        0,
+        Math.min(1, (e.clientX - rect.left) / rect.width)
+      );
       const seekTime = pos * video.duration;
-      
+
       // Update progress bar immediately for smooth visual feedback
       progress.style.width = `${pos * 100}%`;
-      timeDisplay.textContent = `${this.formatTime(seekTime)} / ${this.formatTime(video.duration)}`;
+      timeDisplay.textContent = `${this.formatTime(
+        seekTime
+      )} / ${this.formatTime(video.duration)}`;
 
       // Debounce the actual seek operation
       clearTimeout(seekDebounceTimeout);
@@ -326,7 +379,7 @@ class XStreamPlayer {
 
     // Preload video data
     video.preload = "auto";
-    
+
     // Add seeking state class for visual feedback
     video.addEventListener("seeking", () => {
       container.classList.add("is-seeking");
@@ -340,7 +393,8 @@ class XStreamPlayer {
     // Keyboard shortcuts
     document.addEventListener("keydown", (e) => {
       // Only handle shortcuts if the player is in focus
-      const isPlayerFocused = e.target === document.body || container.contains(e.target);
+      const isPlayerFocused =
+        e.target === document.body || container.contains(e.target);
       if (!isPlayerFocused) return;
 
       switch (e.key.toLowerCase()) {
@@ -400,33 +454,43 @@ class XStreamPlayer {
 
     // Loading states
     video.addEventListener("loadstart", () => {
-      this.setLoadingState('initial', true);
-    });
-
-    video.addEventListener("canplay", () => {
-      this.setLoadingState('initial', false);
-      this.setLoadingState('buffering', false);
-      container.classList.remove("is-initial-load");
+      this.setLoadingState("initial", true);
     });
 
     video.addEventListener("waiting", () => {
-      this.setLoadingState('buffering', true);
+      this.setLoadingState("buffering", true);
     });
 
     video.addEventListener("playing", () => {
-      this.setLoadingState('buffering', false);
-      this.setLoadingState('seeking', false);
-      this.setLoadingState('fragment', false);
+      this.setLoadingState("buffering", false);
+      this.setLoadingState("initial", false);
+    });
+
+    video.addEventListener("canplay", () => {
+      this.setLoadingState("initial", false);
+      this.setLoadingState("buffering", false);
+    });
+
+    video.addEventListener("seeking", () => {
+      this.setLoadingState("seeking", true);
+      container.classList.add("is-seeking");
     });
 
     video.addEventListener("seeked", () => {
-      this.setLoadingState('seeking', false);
-      this.setLoadingState('fragment', false);
+      this.setLoadingState("seeking", false);
+      container.classList.remove("is-seeking");
+      isSeeking = false;
+    });
+
+    video.addEventListener("stalled", () => {
+      if (!this.video.paused) {
+        this.setLoadingState("buffering", true);
+      }
     });
 
     // Error handling
     video.addEventListener("error", () => {
-      this.setLoadingState('error', true);
+      this.setLoadingState("error", true);
       console.error("Video error:", video.error);
     });
   }
@@ -442,13 +506,17 @@ class XStreamPlayer {
   toggleMute() {
     this.video.muted = !this.video.muted;
     const volumeButton = this.container.querySelector(".volume");
-    volumeButton.innerHTML = this.video.muted ? this.createMutedIcon() : this.createVolumeIcon();
+    volumeButton.innerHTML = this.video.muted
+      ? this.createMutedIcon()
+      : this.createVolumeIcon();
   }
 
   setVolume(value) {
     this.volume = Math.max(0, Math.min(1, value));
     this.video.volume = this.volume;
-    this.container.querySelector(".volume-level").style.width = `${this.volume * 100}%`;
+    this.container.querySelector(".volume-level").style.width = `${
+      this.volume * 100
+    }%`;
   }
 
   toggleFullscreen() {
@@ -495,8 +563,8 @@ class XStreamPlayer {
           maxRetry: 3,
           retryDelay: 500,
           maxRetryDelay: 2000,
-          backoff: 'exponential'
-        }
+          backoff: "exponential",
+        },
       },
       // Optimize buffer management
       backBufferLength: 30, // Only keep 30 seconds of back buffer
@@ -509,24 +577,26 @@ class XStreamPlayer {
     // Handle HLS events for optimized loading
     hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
       this.updateQualityLevels(hls);
-      console.log('Manifest loaded, found ' + hls.levels.length + ' quality level(s)');
+      console.log(
+        "Manifest loaded, found " + hls.levels.length + " quality level(s)"
+      );
     });
 
     // Loading states for fragments
     let fragLoadingTimeout;
-    
+
     hls.on(window.Hls.Events.FRAG_LOADING, (event, data) => {
       // Clear any existing timeout
       if (fragLoadingTimeout) {
         clearTimeout(fragLoadingTimeout);
       }
-      
+
       // Only show loading state if fragment takes more than 150ms to load
       fragLoadingTimeout = setTimeout(() => {
-        this.setLoadingState('fragment', true);
+        this.setLoadingState("fragment", true);
       }, 150);
-      
-      console.log('Loading fragment at position:', data.frag.start);
+
+      console.log("Loading fragment at position:", data.frag.start);
     });
 
     hls.on(window.Hls.Events.FRAG_LOADED, (event, data) => {
@@ -534,14 +604,14 @@ class XStreamPlayer {
       if (fragLoadingTimeout) {
         clearTimeout(fragLoadingTimeout);
       }
-      
-      this.setLoadingState('fragment', false);
-      console.log('Loaded fragment at position:', data.frag.start);
+
+      this.setLoadingState("fragment", false);
+      console.log("Loaded fragment at position:", data.frag.start);
     });
 
     // Error handling
     hls.on(window.Hls.Events.ERROR, (event, data) => {
-      this.setLoadingState('hlsError', true);
+      this.setLoadingState("hlsError", true);
       console.error("HLS error:", data);
       if (data.fatal) {
         switch (data.type) {
@@ -562,7 +632,7 @@ class XStreamPlayer {
       } else {
         // Non-fatal error, remove loading state after a delay
         setTimeout(() => {
-          this.setLoadingState('hlsError', false);
+          this.setLoadingState("hlsError", false);
         }, 2000);
       }
     });
@@ -587,15 +657,15 @@ class XStreamPlayer {
       if (seekLoadingTimeout) {
         clearTimeout(seekLoadingTimeout);
       }
-      
+
       seekLoadingTimeout = setTimeout(() => {
-        this.setLoadingState('seeking', true);
+        this.setLoadingState("seeking", true);
       }, 150);
 
       // Clear existing fragments that are no longer needed
       hls.trigger(window.Hls.Events.BUFFER_FLUSHING, {
         startOffset: 0,
-        endOffset: targetTime - 1
+        endOffset: targetTime - 1,
       });
 
       // Find the closest fragment to the target time
@@ -604,13 +674,16 @@ class XStreamPlayer {
         if (seekLoadingTimeout) {
           clearTimeout(seekLoadingTimeout);
         }
-        this.setLoadingState('seeking', false);
+        this.setLoadingState("seeking", false);
         return;
       }
 
       let targetFragment = null;
       for (let i = 0; i < fragments.length; i++) {
-        if (fragments[i].start <= targetTime && fragments[i].end >= targetTime) {
+        if (
+          fragments[i].start <= targetTime &&
+          fragments[i].end >= targetTime
+        ) {
           targetFragment = fragments[i];
           break;
         }
@@ -619,17 +692,19 @@ class XStreamPlayer {
       if (targetFragment) {
         // Load the target fragment and a few subsequent fragments
         hls.trigger(window.Hls.Events.BUFFER_RESET);
-        
+
         const fragLoadedCallback = (event, data) => {
           if (data.frag.start >= targetTime - 0.1) {
             hls.off(window.Hls.Events.FRAG_LOADED, fragLoadedCallback);
             this.video.currentTime = targetTime;
           }
         };
-        
+
         const seekingCallback = () => {
-          this.video.removeEventListener('seeking', seekingCallback);
-          this.video.addEventListener('canplay', canPlayCallback, { once: true });
+          this.video.removeEventListener("seeking", seekingCallback);
+          this.video.addEventListener("canplay", canPlayCallback, {
+            once: true,
+          });
         };
 
         const canPlayCallback = () => {
@@ -637,14 +712,14 @@ class XStreamPlayer {
           if (seekLoadingTimeout) {
             clearTimeout(seekLoadingTimeout);
           }
-          this.setLoadingState('seeking', false);
-          this.setLoadingState('fragment', false);
-          
+          this.setLoadingState("seeking", false);
+          this.setLoadingState("fragment", false);
+
           // Remove the event listener
-          this.video.removeEventListener('canplay', canPlayCallback);
+          this.video.removeEventListener("canplay", canPlayCallback);
         };
 
-        this.video.addEventListener('seeking', seekingCallback, { once: true });
+        this.video.addEventListener("seeking", seekingCallback, { once: true });
         hls.on(window.Hls.Events.FRAG_LOADED, fragLoadedCallback);
 
         // Start loading from the target fragment
@@ -654,26 +729,34 @@ class XStreamPlayer {
         if (seekLoadingTimeout) {
           clearTimeout(seekLoadingTimeout);
         }
-        this.setLoadingState('seeking', false);
+        this.setLoadingState("seeking", false);
       }
     };
 
     // Update seek handling in event listeners
     const handleSeek = (e) => {
-      const rect = this.container.querySelector(".progress-bar").getBoundingClientRect();
-      const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const rect = this.container
+        .querySelector(".progress-bar")
+        .getBoundingClientRect();
+      const pos = Math.max(
+        0,
+        Math.min(1, (e.clientX - rect.left) / rect.width)
+      );
       const seekTime = pos * this.video.duration;
-      
+
       // Update UI immediately
       const progress = this.container.querySelector(".progress");
       progress.style.width = `${pos * 100}%`;
-      this.container.querySelector(".time-display").textContent = 
-        `${this.formatTime(seekTime)} / ${this.formatTime(this.video.duration)}`;
+      this.container.querySelector(
+        ".time-display"
+      ).textContent = `${this.formatTime(seekTime)} / ${this.formatTime(
+        this.video.duration
+      )}`;
 
       // Debounce the actual seek operation
       clearTimeout(seekTimer);
       lastSeekTarget = seekTime;
-      
+
       seekTimer = setTimeout(() => {
         if (Math.abs(this.video.currentTime - lastSeekTarget) > 0.5) {
           seekToPosition(lastSeekTarget);
@@ -709,14 +792,15 @@ class XStreamPlayer {
     const qualityMenu = this.container.querySelector(".quality-menu");
     const levels = hls.levels;
     const currentLevel = hls.currentLevel;
-    
+
     // Clear existing menu items
     qualityMenu.innerHTML = "";
 
     // Add Auto quality option
     const autoItem = document.createElement("div");
-    autoItem.className = "quality-menu-item" + (currentLevel === -1 ? " active" : "");
-    autoItem.innerHTML = this.createCheckIcon() + '<span>Auto</span>';
+    autoItem.className =
+      "quality-menu-item" + (currentLevel === -1 ? " active" : "");
+    autoItem.innerHTML = this.createCheckIcon() + "<span>Auto</span>";
     autoItem.addEventListener("click", () => this.setQuality(hls, -1));
     qualityMenu.appendChild(autoItem);
 
@@ -724,7 +808,8 @@ class XStreamPlayer {
     levels.forEach((level, index) => {
       const quality = this.formatQuality(level.height);
       const item = document.createElement("div");
-      item.className = "quality-menu-item" + (currentLevel === index ? " active" : "");
+      item.className =
+        "quality-menu-item" + (currentLevel === index ? " active" : "");
       item.innerHTML = this.createCheckIcon() + `<span>${quality}</span>`;
       item.addEventListener("click", () => this.setQuality(hls, index));
       qualityMenu.appendChild(item);
@@ -736,7 +821,7 @@ class XStreamPlayer {
     // Add click handler for quality button
     const qualityContainer = this.container.querySelector(".quality-container");
     const qualityButton = qualityContainer.querySelector(".quality-button");
-    
+
     qualityButton.addEventListener("click", (e) => {
       e.stopPropagation();
       qualityContainer.classList.toggle("active");
@@ -751,13 +836,18 @@ class XStreamPlayer {
   setQuality(hls, levelIndex) {
     hls.currentLevel = levelIndex;
     this.updateActiveQuality(hls, levelIndex);
-    this.container.querySelector(".quality-container").classList.remove("active");
+    this.container
+      .querySelector(".quality-container")
+      .classList.remove("active");
   }
 
   updateActiveQuality(hls, levelIndex) {
     const items = this.container.querySelectorAll(".quality-menu-item");
     items.forEach((item, index) => {
-      item.classList.toggle("active", index === 0 ? levelIndex === -1 : index - 1 === levelIndex);
+      item.classList.toggle(
+        "active",
+        index === 0 ? levelIndex === -1 : index - 1 === levelIndex
+      );
     });
     this.updateQualityButtonText(hls, levelIndex);
   }
@@ -765,7 +855,7 @@ class XStreamPlayer {
   updateQualityButtonText(hls, levelIndex) {
     const qualityButton = this.container.querySelector(".quality-button");
     const span = qualityButton.querySelector("span");
-    
+
     if (levelIndex === -1) {
       span.textContent = "Auto";
     } else {
@@ -826,7 +916,7 @@ class XStreamPlayer {
 
     // Set the video source to the current segment
     this.video.src = segment.url;
-    
+
     // When the current segment ends, play the next one
     const onEnded = () => {
       this.currentSegmentIndex++;
@@ -835,9 +925,9 @@ class XStreamPlayer {
     };
 
     this.video.addEventListener("ended", onEnded);
-    
+
     // Play the segment
-    this.video.play().catch(e => {
+    this.video.play().catch((e) => {
       console.error("Error playing segment:", e);
       // Try to auto-recover by moving to next segment
       this.currentSegmentIndex++;
@@ -847,7 +937,10 @@ class XStreamPlayer {
 
   seek(seconds) {
     const newTime = this.video.currentTime + seconds;
-    this.video.currentTime = Math.max(0, Math.min(newTime, this.video.duration));
+    this.video.currentTime = Math.max(
+      0,
+      Math.min(newTime, this.video.duration)
+    );
   }
 
   adjustVolume(delta) {
